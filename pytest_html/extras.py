@@ -1,6 +1,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+from typing import Dict
 
 FORMAT_HTML = "html"
 FORMAT_IMAGE = "image"
@@ -10,7 +11,7 @@ FORMAT_URL = "url"
 FORMAT_VIDEO = "video"
 
 
-def extra(content, format, name=None, mime_type=None, extension=None):
+def extra(content, format, name=None, mime_type=None, extension=None) -> Dict:
     return {
         "name": name,
         "format": format,
@@ -20,7 +21,7 @@ def extra(content, format, name=None, mime_type=None, extension=None):
     }
 
 
-def html(content):
+def html(content) -> Dict:
     return extra(content, FORMAT_HTML)
 
 

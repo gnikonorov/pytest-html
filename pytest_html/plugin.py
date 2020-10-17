@@ -16,10 +16,22 @@ from collections import OrderedDict
 from functools import lru_cache
 from html import escape
 from os.path import isfile
+from typing import Any
+from typing import List
+from typing import Optional
 
 import pkg_resources
 import pytest
+from _pytest.config import Config
+from _pytest.config import PytestPluginManager
+from _pytest.config.argparsing import Parser
 from _pytest.logging import _remove_ansi_escape_sequences
+from _pytest.main import Session
+from _pytest.nodes import Item
+from _pytest.reports import CollectReport
+from _pytest.reports import TestReport
+from _pytest.runner import CallInfo
+from _pytest.terminal import TerminalReporter
 from py.xml import html
 from py.xml import raw
 
@@ -28,23 +40,24 @@ from . import __version__
 from . import extras
 
 
+# NOTE: This return signature is wrong, it returns the module
 @lru_cache()
-def ansi_support():
+def ansi_support() -> Optional:  # [Module]:
     try:
         # from ansi2html import Ansi2HTMLConverter, style  # NOQA
         return importlib.import_module("ansi2html")
     except ImportError:
         # ansi2html is not installed
-        pass
+        return None
 
 
-def pytest_addhooks(pluginmanager):
+def pytest_addhooks(pluginmanager: PytestPluginManager) -> None:
     from . import hooks
 
     pluginmanager.add_hookspecs(hooks)
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser: Parser) -> None:
     group = parser.getgroup("terminal reporting")
     group.addoption(
         "--html",
@@ -84,7 +97,7 @@ def pytest_addoption(parser):
     )
 
 
-def pytest_configure(config):
+def pytest_configure(config: Config) -> None:
     htmlpath = config.getoption("htmlpath")
     if htmlpath:
         for csspath in config.getoption("css"):
@@ -96,7 +109,7 @@ def pytest_configure(config):
             config.pluginmanager.register(config._html)
 
 
-def pytest_unconfigure(config):
+def pytest_unconfigure(config: Config) -> None:
     html = getattr(config, "_html", None)
     if html:
         del config._html
@@ -104,7 +117,7 @@ def pytest_unconfigure(config):
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item, call):
+def pytest_runtest_makereport(item: Item, call: CallInfo[None]) -> None:
     outcome = yield
     report = outcome.get_result()
     if report.when == "call":
@@ -114,7 +127,7 @@ def pytest_runtest_makereport(item, call):
 
 
 @pytest.fixture
-def extra(pytestconfig):
+def extra(pytestconfig: Config) -> None:
     """Add details to the HTML reports.
 
     .. code-block:: python
@@ -130,13 +143,15 @@ def extra(pytestconfig):
     del pytestconfig.extras[:]
 
 
-def data_uri(content, mime_type="text/plain", charset="utf-8"):
+def data_uri(
+    content: str, mime_type: str = "text/plain", charset: str = "utf-8"
+) -> str:
     data = b64encode(content.encode(charset)).decode("ascii")
     return f"data:{mime_type};charset={charset};base64,{data}"
 
 
 class HTMLReport:
-    def __init__(self, logfile, config):
+    def __init__(self, logfile: str, config: Config) -> None:
         logfile = os.path.expanduser(os.path.expandvars(logfile))
         self.logfile = os.path.abspath(logfile)
         self.test_logs = []
@@ -152,7 +167,9 @@ class HTMLReport:
         self.reports = defaultdict(list)
 
     class TestResult:
-        def __init__(self, outcome, report, logfile, config):
+        def __init__(
+            self, outcome: str, report: TestReport, logfile: str, config: Config
+        ) -> None:
             self.test_id = report.nodeid.encode("utf-8").decode("unicode_escape")
             if getattr(report, "when", "call") != "call":
                 self.test_id = "::".join([report.nodeid, report.when])
@@ -198,7 +215,7 @@ class HTMLReport:
                     class_=tr_class,
                 )
 
-        def __lt__(self, other):
+        def __lt__(self, other: Any) -> bool:
             order = (
                 "Error",
                 "Failed",
@@ -228,8 +245,8 @@ class HTMLReport:
 
             relative_path = f"assets/{asset_file_name}"
 
-            kwargs = {"encoding": "utf-8"} if "b" not in mode else {}
-            with open(asset_path, mode, **kwargs) as f:
+            encoding = "utf-8" if "b" not in mode else None
+            with open(asset_path, mode, encoding=encoding) as f:
                 f.write(content)
             return relative_path
 
@@ -278,7 +295,7 @@ class HTMLReport:
                 )
                 self.links_html.append(" ")
 
-        def append_log_html(self, report, additional_html):
+        def append_log_html(self, report: TestReport, additional_html) -> None:
             log = html.div(class_="log")
             if report.longrepr:
                 # longreprtext is only filled out on failure by pytest
@@ -370,7 +387,7 @@ class HTMLReport:
             )
             self.additional_html.append(html.div(html_div, class_="video"))
 
-    def _appendrow(self, outcome, report):
+    def _appendrow(self, outcome, report: TestReport) -> None:
         result = self.TestResult(outcome, report, self.logfile, self.config)
         if result.row_table is not None:
             index = bisect.bisect_right(self.results, result)
@@ -383,7 +400,7 @@ class HTMLReport:
                 tbody.append(result.row_extra)
             self.test_logs.insert(index, tbody)
 
-    def append_passed(self, report):
+    def append_passed(self, report: TestReport) -> None:
         if report.when == "call":
             if hasattr(report, "wasxfail"):
                 self.xpassed += 1
@@ -392,7 +409,7 @@ class HTMLReport:
                 self.passed += 1
                 self._appendrow("Passed", report)
 
-    def append_failed(self, report):
+    def append_failed(self, report: CollectReport) -> None:
         if getattr(report, "when", None) == "call":
             if hasattr(report, "wasxfail"):
                 # pytest < 3.0 marked xpasses as failures
@@ -405,7 +422,7 @@ class HTMLReport:
             self.errors += 1
             self._appendrow("Error", report)
 
-    def append_skipped(self, report):
+    def append_skipped(self, report: TestReport) -> None:
         if hasattr(report, "wasxfail"):
             self.xfailed += 1
             self._appendrow("XFailed", report)
@@ -413,12 +430,13 @@ class HTMLReport:
             self.skipped += 1
             self._appendrow("Skipped", report)
 
-    def append_other(self, report):
+    def append_other(self, report: TestReport) -> None:
         # For now, the only "other" the plugin give support is rerun
-        self.rerun += 1
-        self._appendrow("Rerun", report)
+        if self.rerun is not None:
+            self.rerun += 1
+            self._appendrow("Rerun", report)
 
-    def _generate_report(self, session):
+    def _generate_report(self, session: Session) -> str:
         suite_stop_time = time.time()
         suite_time_delta = suite_stop_time - self.suite_start_time
         numtests = self.passed + self.failed + self.xpassed + self.xfailed
@@ -468,7 +486,7 @@ class HTMLReport:
                 self.generate_checkbox()
                 self.generate_summary_item()
 
-            def generate_checkbox(self):
+            def generate_checkbox(self) -> None:
                 checkbox_kwargs = {"data-test-result": self.test_result.lower()}
                 if self.total == 0:
                     checkbox_kwargs["disabled"] = "true"
@@ -483,7 +501,7 @@ class HTMLReport:
                     **checkbox_kwargs,
                 )
 
-            def generate_summary_item(self):
+            def generate_summary_item(self) -> None:
                 self.summary_item = html.span(
                     f"{self.total} {self.label}", class_=self.class_html
                 )
@@ -578,13 +596,14 @@ class HTMLReport:
 
         doc = html.html(head, body)
 
-        unicode_doc = "<!DOCTYPE html>\n{}".format(doc.unicode(indent=2))
+        unicode_doc_str = "<!DOCTYPE html>\n{}".format(doc.unicode(indent=2))
 
         # Fix encoding issues, e.g. with surrogates
-        unicode_doc = unicode_doc.encode("utf-8", errors="xmlcharrefreplace")
+        unicode_doc = unicode_doc_str.encode("utf-8", errors="xmlcharrefreplace")
         return unicode_doc.decode("utf-8")
 
-    def _generate_environment(self, config):
+    # TODO: What is the list type
+    def _generate_environment(self, config: Config) -> List[Any]:
         if not hasattr(config, "_metadata") or config._metadata is None:
             return []
 
@@ -611,7 +630,7 @@ class HTMLReport:
         environment.append(html.table(rows, id="environment"))
         return environment
 
-    def _save_report(self, report_content):
+    def _save_report(self, report_content: str) -> None:
         dir_name = os.path.dirname(self.logfile)
         assets_dir = os.path.join(dir_name, "assets")
 
@@ -627,7 +646,7 @@ class HTMLReport:
             with open(style_path, "w", encoding="utf-8") as f:
                 f.write(self.style_css)
 
-    def _post_process_reports(self):
+    def _post_process_reports(self) -> None:
         for test_name, test_reports in self.reports.items():
             outcome = "passed"
             wasxfail = False
@@ -685,20 +704,20 @@ class HTMLReport:
             # we don't append other here since the only case supported
             #  for append_other is rerun, which is handled in the loop above
 
-    def pytest_runtest_logreport(self, report):
+    def pytest_runtest_logreport(self, report: TestReport) -> None:
         self.reports[report.nodeid].append(report)
 
-    def pytest_collectreport(self, report):
+    def pytest_collectreport(self, report: CollectReport) -> None:
         if report.failed:
             self.append_failed(report)
 
-    def pytest_sessionstart(self, session):
+    def pytest_sessionstart(self, session: Session) -> None:
         self.suite_start_time = time.time()
 
-    def pytest_sessionfinish(self, session):
+    def pytest_sessionfinish(self, session: Session) -> None:
         self._post_process_reports()
         report_content = self._generate_report(session)
         self._save_report(report_content)
 
-    def pytest_terminal_summary(self, terminalreporter):
+    def pytest_terminal_summary(self, terminalreporter: TerminalReporter) -> None:
         terminalreporter.write_sep("-", f"generated html file: file://{self.logfile}")
