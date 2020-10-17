@@ -17,6 +17,8 @@ from functools import lru_cache
 from html import escape
 from os.path import isfile
 from typing import Any
+from typing import Dict
+from typing import Generator
 from typing import List
 from typing import Optional
 
@@ -42,7 +44,7 @@ from . import extras
 
 # NOTE: This return signature is wrong, it returns the module
 @lru_cache()
-def ansi_support() -> Optional:  # [Module]:
+def ansi_support() -> Optional[int]:  # Module]:
     try:
         # from ansi2html import Ansi2HTMLConverter, style  # NOQA
         return importlib.import_module("ansi2html")
@@ -117,7 +119,7 @@ def pytest_unconfigure(config: Config) -> None:
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item: Item, call: CallInfo[None]) -> None:
+def pytest_runtest_makereport(item: Item, call: CallInfo[None]) -> Generator:
     outcome = yield
     report = outcome.get_result()
     if report.when == "call":
@@ -127,7 +129,7 @@ def pytest_runtest_makereport(item: Item, call: CallInfo[None]) -> None:
 
 
 @pytest.fixture
-def extra(pytestconfig: Config) -> None:
+def extra(pytestconfig: Config) -> Generator:
     """Add details to the HTML reports.
 
     .. code-block:: python
@@ -154,9 +156,10 @@ class HTMLReport:
     def __init__(self, logfile: str, config: Config) -> None:
         logfile = os.path.expanduser(os.path.expandvars(logfile))
         self.logfile = os.path.abspath(logfile)
-        self.test_logs = []
+        # TODO: What is the type
+        self.test_logs: List[Any] = []
         self.title = os.path.basename(self.logfile)
-        self.results = []
+        self.results = []  #: List["TestResult"] = []
         self.errors = self.failed = 0
         self.passed = self.skipped = 0
         self.xfailed = self.xpassed = 0
@@ -164,7 +167,7 @@ class HTMLReport:
         self.rerun = 0 if has_rerun else None
         self.self_contained = config.getoption("self_contained_html")
         self.config = config
-        self.reports = defaultdict(list)
+        self.reports: Dict[str, List[TestReport]] = defaultdict(list)
 
     class TestResult:
         def __init__(
@@ -228,8 +231,13 @@ class HTMLReport:
             return order.index(self.outcome) < order.index(other.outcome)
 
         def create_asset(
-            self, content, extra_index, test_index, file_extension, mode="w"
-        ):
+            self,
+            content: str,
+            extra_index: int,
+            test_index: int,
+            file_extension: str,
+            mode: str = "w",
+        ) -> str:
             asset_file_name = "{}_{}_{}.{}".format(
                 re.sub(r"[^\w\.]", "_", self.test_id),
                 str(extra_index),
@@ -250,7 +258,7 @@ class HTMLReport:
                 f.write(content)
             return relative_path
 
-        def append_extra_html(self, extra, extra_index, test_index):
+        def append_extra_html(self, extra, extra_index: int, test_index: int) -> None:
             href = None
             if extra.get("format_type") == extras.FORMAT_IMAGE:
                 self._append_image(extra, extra_index, test_index)
@@ -373,14 +381,14 @@ class HTMLReport:
                 )
             return html_div
 
-        def _append_image(self, extra, extra_index, test_index):
+        def _append_image(self, extra, extra_index: int, test_index: int) -> None:
             image_base = '<img src="{}"/>'
             html_div = self._make_media_html_div(
                 extra, extra_index, test_index, image_base, "image"
             )
             self.additional_html.append(html.div(html_div, class_="image"))
 
-        def _append_video(self, extra, extra_index, test_index):
+        def _append_video(self, extra, extra_index: int, test_index: int) -> None:
             video_base = '<video controls><source src="{}" type="video/mp4"></video>'
             html_div = self._make_media_html_div(
                 extra, extra_index, test_index, video_base, "video"
@@ -409,7 +417,7 @@ class HTMLReport:
                 self.passed += 1
                 self._appendrow("Passed", report)
 
-    def append_failed(self, report: CollectReport) -> None:
+    def append_failed(self, report: TestReport) -> None:
         if getattr(report, "when", None) == "call":
             if hasattr(report, "wasxfail"):
                 # pytest < 3.0 marked xpasses as failures
@@ -475,8 +483,13 @@ class HTMLReport:
 
         class Outcome:
             def __init__(
-                self, outcome, total=0, label=None, test_result=None, class_html=None
-            ):
+                self,
+                outcome: str,
+                total: int = 0,
+                label: str = None,
+                test_result: str = None,
+                class_html: str = None,
+            ) -> None:
                 self.outcome = outcome
                 self.label = label or outcome
                 self.class_html = class_html or outcome
