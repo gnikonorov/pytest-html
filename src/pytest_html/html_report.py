@@ -325,5 +325,9 @@ class HTMLReport:
         report_content = self._generate_report(session)
         self._save_report(report_content)
 
+    def pytest_warning_recorded(self, warning_message, when, nodeid, location):
+        # NOTE: We need to use this hook
+        print(f"{warning_message}|{when}|{nodeid}|{location}")
+
     def pytest_terminal_summary(self, terminalreporter):
         terminalreporter.write_sep("-", f"generated html file: file://{self.logfile}")
